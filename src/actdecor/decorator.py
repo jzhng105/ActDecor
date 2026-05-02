@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from functools import wraps
 from typing import Any, Callable, Literal, Optional
 
-from langchain_core.output_parsers import StrOutputParser
-from langchain_core.prompts import ChatPromptTemplate
+from actllminfer.output_parsers import StrOutputParser
+from actllminfer.prompts import ChatPromptTemplate
 
 ReturnMode = Literal["summary", "original", "tuple", "dict", "object"]
 
@@ -48,7 +48,7 @@ def serialize_for_llm(value: Any, max_chars: int = 12000) -> str:
         return str(value)[:max_chars]
 
 
-class LangChainFunctionSummarizer:
+class ActLLMFunctionSummarizer:
     """Decorator class that adds LLM commentary to wrapped function outputs."""
 
     def __init__(
@@ -186,4 +186,4 @@ def summarize_with_llm(
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     """Convenience decorator factory for :class:`LangChainFunctionSummarizer`."""
 
-    return LangChainFunctionSummarizer(llm=llm, **kwargs)
+    return ActLLMFunctionSummarizer(llm=llm, **kwargs)

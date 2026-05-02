@@ -8,12 +8,10 @@ version = "0.1.0"
 description = "LLM commentary decorators for Python functions"
 readme = "README.md"
 requires-python = ">=3.9"
-license = { text = "MIT" }
-authors = [
-  { name = "ActDecor Contributors" }
-]
+license = { file = "LICENSE" }
+authors = [{ name = "Juntao Zhang" }]
 dependencies = [
-  "langchain-core>=0.2.0"
+  "actllminfer>=0.1.0"
 ]
 
 [project.optional-dependencies]

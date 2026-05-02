@@ -1,9 +1,9 @@
 from __future__ import annotations
-from langchain_openai import ChatOpenAI
+from actllminfer import ChatOpenAI
 import pandas as pd
 
 import pytest
-from langchain_core.runnables import RunnableLambda
+from actllminfer.runnables import RunnableLambda
 from pathlib import Path
 import sys
 
@@ -12,7 +12,7 @@ SRC = ROOT / "src"
 
 sys.path.insert(0, str(SRC))
 
-from actdecor import LangChainFunctionSummarizer, SummaryResult, summarize_with_llm
+from actdecor import ActLLMFunctionSummarizer, SummaryResult, summarize_with_llm
 
 
 @pytest.fixture
@@ -37,7 +37,7 @@ def test_default_object_mode(fake_llm: RunnableLambda):
 
 
 def test_tuple_mode(fake_llm: RunnableLambda):
-    @LangChainFunctionSummarizer(fake_llm, return_mode="tuple")
+    @ActLLMFunctionSummarizer(fake_llm, return_mode="tuple")
     def make_payload() -> dict:
         return {"ok": True}
 
@@ -50,7 +50,7 @@ def test_tuple_mode(fake_llm: RunnableLambda):
 def test_fail_silently_returns_original_when_llm_breaks():
     broken_llm = RunnableLambda(lambda _: (_ for _ in ()).throw(RuntimeError("boom")))
 
-    @LangChainFunctionSummarizer(
+    @ActLLMFunctionSummarizer(
         broken_llm,
         return_mode="dict",
         fail_silently=True,
@@ -66,7 +66,7 @@ def test_fail_silently_returns_original_when_llm_breaks():
 
 
 def test_invalid_return_mode_raises(fake_llm: RunnableLambda):
-    decorator = LangChainFunctionSummarizer(fake_llm)
+    decorator = ActLLMFunctionSummarizer(fake_llm)
     decorator.return_mode = "nope"  # type: ignore[assignment]
 
     @decorator
@@ -75,6 +75,11 @@ def test_invalid_return_mode_raises(fake_llm: RunnableLambda):
 
     with pytest.raises(ValueError):
         fn()
+
+
+# -----------------------------
+# Full test with LLM
+# -----------------------------
 
 llm = ChatOpenAI(
     model="gpt-4.1-mini",
@@ -91,10 +96,6 @@ result = add(2, 3)
 print(result.value)        # 5
 print(result.commentary)   # real LLM output
 
-
-# -----------------------------
-# Sample Data (outside function)
-# -----------------------------
 raw_data = [
     {"policy_id": "P001", "premium": "$1,200 ", "province": "ON", "date": "2024-01-15"},
     {"policy_id": "P002", "premium": "$850", "province": "ON", "date": "2024-02-20"},

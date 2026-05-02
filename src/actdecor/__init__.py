@@ -1,7 +1,7 @@
 """ActDecor: add LLM commentary to Python function outputs."""
 
 from .decorator import (
-    LangChainFunctionSummarizer,
+    ActLLMFunctionSummarizer,
     ReturnMode,
     SummaryResult,
     serialize_for_llm,
@@ -9,7 +9,7 @@ from .decorator import (
 )
 
 __all__ = [
-    "LangChainFunctionSummarizer",
+    "ActLLMFunctionSummarizer",
     "ReturnMode",
     "SummaryResult",
     "serialize_for_llm",

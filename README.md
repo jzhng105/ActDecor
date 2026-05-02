@@ -2,7 +2,7 @@
 
 AI commentary layer for Python pipelines.
 
-ActDecor provides a decorator wrapper that can be attached to any Python function. It executes your function normally, then sends the return value (and optional arguments) to a LangChain-compatible LLM and returns both the original value and a concise summary.
+ActDecor provides a decorator wrapper that can be attached to any Python function. It executes your function normally, then sends the return value (and optional arguments) to a ActLLM-compatible LLM and returns both the original value and a concise summary.
 
 ## Installation
 
@@ -13,7 +13,7 @@ pip install -e .
 ## Quick start
 
 ```python
-from langchain_openai import ChatOpenAI
+from actllminfer import ChatOpenAI
 from actdecor import summarize_with_llm
 
 llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
@@ -45,6 +45,6 @@ print(result.info)        # metadata
 ## API
 
 - `summarize_with_llm(llm, **kwargs)` — decorator factory.
-- `LangChainFunctionSummarizer(llm, **kwargs)` — decorator class.
+- `ActLLMFunctionSummarizer(llm, **kwargs)` — decorator class.
 - `serialize_for_llm(value, max_chars=12000)` — serialization helper.
 - `SummaryResult` — dataclass response object.
