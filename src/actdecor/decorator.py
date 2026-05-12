@@ -6,13 +6,14 @@ import logging
 from dataclasses import dataclass
 from functools import wraps
 from pathlib import Path
-from typing import Any, Callable, Literal, Optional, Union
+from typing import Any, Callable, Iterable, Literal, Mapping, Optional, Union
 
 from actllminfer.output_parsers import StrOutputParser
 from actllminfer.prompts import ChatPromptTemplate
 
 from .inventory import FunctionInventory
 from .router_client import ActRouterClient
+from .vendors import available_candidate_models, detect_available_vendors
 
 log = logging.getLogger("actdecor")
 
@@ -94,6 +95,8 @@ def _routing_info(routing: dict[str, Any]) -> dict[str, Any]:
         "router": routing.get("router"),
         "estimated_cost_usd": routing.get("estimated_cost_usd"),
         "estimated_latency_ms": routing.get("estimated_latency_ms"),
+        "available_vendors": routing.get("available_vendors"),
+        "candidate_models": routing.get("candidate_models"),
         "error": routing.get("error"),
     }
 
@@ -102,10 +105,13 @@ class ActLLMFunctionSummarizer:
     """Decorator class that adds LLM commentary to wrapped function outputs.
 
     Optionally consults `ActRouter <https://github.com/jzhng105/actrouter>`_ to
-    pick the best LLM for the wrapped function. The chosen model is cached in a
-    *function inventory file* (see :class:`~actdecor.inventory.FunctionInventory`)
-    keyed by a stable fingerprint of the function, so future calls reuse that
-    model by default without another round-trip to ActRouter.
+    pick the best LLM for the wrapped function. Candidate models are first
+    narrowed to vendors usable from the current environment (see
+    :func:`~actdecor.vendors.detect_available_vendors`). The chosen model is
+    cached in a *function inventory file* (see
+    :class:`~actdecor.inventory.FunctionInventory`) keyed by a stable
+    fingerprint of the function, so future calls reuse it without another
+    round-trip to ActRouter.
     """
 
     def __init__(
@@ -132,6 +138,12 @@ class ActLLMFunctionSummarizer:
         use_inventory: bool = True,
         inventory: Optional[Union[FunctionInventory, PathLike]] = None,
         route_fail_silently: bool = True,
+        # --- restrict candidates to locally usable vendors ---------------
+        restrict_to_available_vendors: bool = True,
+        probe_vendors: bool = False,
+        vendor_probe_timeout: float = 3.0,
+        vendors: Optional[Iterable[str]] = None,
+        vendor_env: Optional[Mapping[str, Iterable[str]]] = None,
     ):
         self.llm = llm
         self.return_mode = return_mode
@@ -154,6 +166,16 @@ class ActLLMFunctionSummarizer:
         self.auto_route = auto_route
         self.apply_model = apply_model
         self.route_fail_silently = route_fail_silently
+
+        # Restrict candidate models to vendors the caller can actually use.
+        self.restrict_to_available_vendors = restrict_to_available_vendors
+        self.probe_vendors = probe_vendors
+        self.vendor_probe_timeout = vendor_probe_timeout
+        self.vendors = list(vendors) if vendors is not None else None
+        self.vendor_env = dict(vendor_env) if vendor_env else None
+        self._available_vendors: Optional[list[str]] = None
+        self._candidate_models_cache: Optional[list[str]] = None
+        self._candidate_models_resolved = False
 
         if not use_inventory:
             self.inventory: Optional[FunctionInventory] = None
@@ -197,6 +219,41 @@ Function return value:
     def _routing_active(self) -> bool:
         return self.auto_route and (self.inventory is not None or self.router_client is not None)
 
+    def resolve_candidate_models(self) -> Optional[list[str]]:
+        """Candidate model ids to send to ActRouter.
+
+        If ``candidate_models`` was given explicitly it is used as-is. Otherwise,
+        when ``restrict_to_available_vendors`` is set, detect which major LLM
+        vendors are usable from this environment (optionally probing their APIs)
+        and limit candidates to those vendors' models. Returns ``None`` to mean
+        "no restriction — let ActRouter use its full catalog".
+        """
+
+        if self.candidate_models is not None:
+            return list(self.candidate_models)
+        if not self.restrict_to_available_vendors:
+            return None
+        if not self._candidate_models_resolved:
+            self._candidate_models_resolved = True
+            if self.vendors is not None:
+                vendors = set(self.vendors)
+            else:
+                vendors = detect_available_vendors(
+                    probe=self.probe_vendors,
+                    timeout=self.vendor_probe_timeout,
+                    extra_env=self.vendor_env,
+                )
+            self._available_vendors = sorted(vendors)
+            self._candidate_models_cache = available_candidate_models(
+                vendors, router_client=self.router_client
+            )
+            if not self._candidate_models_cache:
+                log.info(
+                    "ActDecor: no usable LLM vendors detected; "
+                    "letting ActRouter choose from its full catalog"
+                )
+        return self._candidate_models_cache or None
+
     def resolve_model(self, func: Callable[..., Any]) -> dict[str, Any]:
         """Determine the model ``func`` should use.
 
@@ -212,6 +269,8 @@ Function return value:
             "estimated_cost_usd": None,
             "estimated_latency_ms": None,
             "ranking": None,
+            "available_vendors": None,
+            "candidate_models": None,
             "error": None,
         }
         if not self._routing_active():
@@ -233,12 +292,16 @@ Function return value:
         if self.router_client is None:
             return routing
 
+        candidates = self.resolve_candidate_models()
+        routing["available_vendors"] = self._available_vendors
+        routing["candidate_models"] = candidates
+
         try:
             response = self.router_client.route(
                 func,
                 router=self.router,
                 top_k=self.route_top_k,
-                candidate_models=self.candidate_models,
+                candidate_models=candidates,
                 **self.route_hints,
             )
         except Exception as exc:

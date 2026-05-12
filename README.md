@@ -74,11 +74,12 @@ print(result.info["routing"])
 
 On the **first call** ActDecor:
 
-1. looks the function up in the inventory file (a miss the first time);
-2. calls `POST /v1/route` on ActRouter with the function metadata;
-3. records the recommended `chosen_model` in the inventory file, keyed by a
+1. detects which major LLM vendors are usable here and limits candidates to them;
+2. looks the function up in the inventory file (a miss the first time);
+3. calls `POST /v1/route` on ActRouter with the function metadata;
+4. records the recommended `chosen_model` in the inventory file, keyed by a
    stable fingerprint of the function;
-4. points `llm` at that model (best effort: `set_model(...)` or a `model` /
+5. points `llm` at that model (best effort: `set_model(...)` or a `model` /
    `model_name` / `model_id` attribute).
 
 On **every later call** (including in a fresh process) it reads the model from
@@ -112,13 +113,61 @@ A plain JSON hash map of `function fingerprint -> recommendation`:
 - You can commit the file, hand-edit it, or pre-populate it to pin a model
   without ever calling ActRouter.
 
+### Restricting to vendors you can actually use
+
+Before routing, ActDecor figures out which **major LLM vendors** are usable from
+the current environment and tells ActRouter to only consider those vendors'
+models. By default a vendor counts as "available" when its API-key environment
+variable is set (`OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GOOGLE_API_KEY` /
+`GEMINI_API_KEY`, `DEEPSEEK_API_KEY`, `XAI_API_KEY`, `MISTRAL_API_KEY`,
+`COHERE_API_KEY`, `DASHSCOPE_API_KEY`, `MOONSHOT_API_KEY`, `ZHIPUAI_API_KEY`,
+`MINIMAX_API_KEY`, `NVIDIA_API_KEY`, …). Set `probe_vendors=True` to also ping
+each vendor's `/models` endpoint and drop ones whose key is rejected.
+
+```python
+@summarize_with_llm(
+    llm,
+    router_url="https://<your-actrouter>",
+    probe_vendors=True,                 # actually call each vendor's API
+    # vendors=["openai", "anthropic"],  # or pin the set explicitly
+    # vendor_env={"meta": ["TOGETHER_API_KEY"]},  # extra key env vars
+)
+def summarize_article(text: str) -> str:
+    """Summarize a news article in 3 bullet points."""
+    ...
+
+print(summarize_article("...").info["routing"]["available_vendors"])  # ['anthropic', 'openai']
+print(summarize_article("...").info["routing"]["candidate_models"])    # ['gpt-5-mini', 'claude-haiku-4-5', ...]
+```
+
+The candidate ids are taken from ActRouter's `GET /v1/models` (filtered by
+vendor `family`), falling back to a built-in catalog snapshot if that call
+fails. If no vendor is detected, ActDecor sends no restriction and lets
+ActRouter pick from its full catalog. Set `restrict_to_available_vendors=False`
+to disable this entirely, or pass an explicit `candidate_models=[...]` to
+bypass detection.
+
+You can also probe / map vendors directly:
+
+```python
+from actdecor import detect_available_vendors, available_candidate_models, ActRouterClient
+
+vendors = detect_available_vendors(probe=True)            # {'openai', 'anthropic'}
+client = ActRouterClient("https://<your-actrouter>")
+candidates = available_candidate_models(vendors, router_client=client)
+```
+
 You can also drive routing manually:
 
 ```python
 from actdecor import ActRouterClient, FunctionInventory
 
 client = ActRouterClient("https://<your-actrouter>")
-model = client.recommend_model(summarize_article, task_kind="summarization")
+model = client.recommend_model(
+    summarize_article,
+    task_kind="summarization",
+    candidate_models=candidates,
+)
 
 FunctionInventory().record(summarize_article, model, router="heuristic")
 ```
@@ -131,13 +180,18 @@ FunctionInventory().record(summarize_article, model, router="heuristic")
 | `router_client`      | `None`         | Pre-built `ActRouterClient` (overrides `router_url`).          |
 | `router`             | `"heuristic"`  | Strategy: `heuristic` \| `rules` \| `random` \| `smallest` \| `largest`. |
 | `route_top_k`        | `3`            | How many ranked candidates to request.                         |
-| `candidate_models`   | `None`         | Optional whitelist of model ids.                               |
+| `candidate_models`   | `None`         | Explicit whitelist of model ids (bypasses vendor detection).   |
 | `route_hints`        | `None`         | Extra static metadata (`task_kind`, `tags`, token estimates, `latency_budget_ms`, `cost_budget_usd`, `privacy_tier`). |
 | `auto_route`         | `True`         | Master switch for routing + inventory lookups.                 |
 | `apply_model`        | `True`         | Whether to point `llm` at the chosen model.                    |
 | `use_inventory`      | `True`         | Whether to read/write the inventory file.                      |
 | `inventory`          | `None`         | Inventory file path or `FunctionInventory` instance.           |
 | `route_fail_silently`| `True`         | Swallow ActRouter errors and keep the original model.          |
+| `restrict_to_available_vendors` | `True` | Limit candidate models to vendors usable from this environment. |
+| `probe_vendors`      | `False`        | Also ping each vendor's API (not just check env vars).         |
+| `vendor_probe_timeout` | `3.0`        | Per-vendor probe timeout, seconds.                             |
+| `vendors`            | `None`         | Explicit vendor/family set; skips auto-detection.              |
+| `vendor_env`         | `None`         | Extra `{vendor: [ENV_VAR, ...]}` mappings for key detection.   |
 
 ## API
 
@@ -152,3 +206,7 @@ FunctionInventory().record(summarize_article, model, router="heuristic")
 - `function_fingerprint(func)` — stable inventory key for a function.
 - `apply_model_to_llm(llm, model)` — best-effort model setter.
 - `default_inventory_path()` — resolves the default inventory file location.
+- `detect_available_vendors(*, probe=False, ...)` — vendor/family names usable here.
+- `probe_vendor(vendor, *, api_key=None, ...)` — does this vendor's API answer?
+- `available_candidate_models(vendors, *, catalog_models=None, router_client=None)` — vendors → model ids.
+- `VENDOR_API_KEYS`, `FALLBACK_FAMILY_MODELS` — the built-in vendor maps.
