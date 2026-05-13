@@ -8,6 +8,7 @@ from functools import wraps
 from pathlib import Path
 from typing import Any, Callable, Iterable, Literal, Mapping, Optional, Union
 
+from actllminfer import completion as unified_completion
 from actllminfer.output_parsers import StrOutputParser
 from actllminfer.prompts import ChatPromptTemplate
 
@@ -98,12 +99,12 @@ def read_model_from_llm(llm: Any) -> Optional[str]:
                 return str(value)
         except Exception:
             pass
-    
+
     for attr in _MODEL_ATTRS:
         value = getattr(llm, attr, None)
         if value:
             return str(value)
-        
+
     return None
 
 def _routing_info(routing: dict[str, Any]) -> dict[str, Any]:
@@ -120,23 +121,45 @@ def _routing_info(routing: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _provider_from_model(model: str) -> Optional[str]:
+    """Pull the provider prefix off a LiteLLM-style ``provider/model`` string."""
+
+    if not model:
+        return None
+    for sep in (":", "/"):
+        if sep in model:
+            head = model.split(sep, 1)[0].strip()
+            if head:
+                return head.lower()
+    return None
+
+
 class ActLLMFunctionSummarizer:
     """Decorator class that adds LLM commentary to wrapped function outputs.
 
+    There are two ways to point the decorator at a model:
+
+    * ``model="provider/model"`` — use the **unified** ``actllminfer.completion()``
+      endpoint (LiteLLM-style). No provider client object is constructed; the
+      decorator dispatches each call through :func:`actllminfer.completion`.
+    * ``llm=<runnable>`` — legacy path. Any LangChain-Core-style runnable
+      (e.g. ``ChatOpenAI(...)``) is wired into a ``prompt | llm | StrOutputParser``
+      chain. This is preserved for backward compatibility and for tests that
+      stub out the LLM with a ``RunnableLambda``.
+
     Optionally consults `ActRouter <https://github.com/jzhng105/actrouter>`_ to
-    pick the best LLM for the wrapped function. Candidate models are first
-    narrowed to vendors usable from the current environment (see
-    :func:`~actdecor.vendors.detect_available_vendors`). The chosen model is
-    cached in a *function inventory file* (see
-    :class:`~actdecor.inventory.FunctionInventory`) keyed by a stable
-    fingerprint of the function, so future calls reuse it without another
-    round-trip to ActRouter.
+    pick the best LLM for the wrapped function. The chosen model is cached in a
+    *function inventory file* (see :class:`~actdecor.inventory.FunctionInventory`)
+    keyed by a stable fingerprint of the function, so future calls reuse it
+    without another round-trip to ActRouter.
     """
 
     def __init__(
         self,
-        llm: Any,
+        llm: Any = None,
         *,
+        model: Optional[str] = None,
+        completion_params: Optional[Mapping[str, Any]] = None,
         return_mode: ReturnMode = "object",
         result_key: str = "value",
         summary_key: str = "commentary",
@@ -164,7 +187,19 @@ class ActLLMFunctionSummarizer:
         vendors: Optional[Iterable[str]] = None,
         vendor_env: Optional[Mapping[str, Iterable[str]]] = None,
     ):
+        if llm is None and model is None:
+            raise ValueError(
+                "ActLLMFunctionSummarizer requires either model='provider/model' "
+                "(unified endpoint) or llm=<runnable>"
+            )
+        if llm is not None and model is not None:
+            raise ValueError(
+                "Pass either model='provider/model' or llm=<runnable>, not both"
+            )
+
         self.llm = llm
+        self.model = model
+        self.completion_params: dict[str, Any] = dict(completion_params or {})
         self.return_mode = return_mode
         self.result_key = result_key
         self.summary_key = summary_key
@@ -231,7 +266,46 @@ Function return value:
             ]
         )
 
-        self.chain = self.prompt | self.llm | StrOutputParser()
+        # Legacy chain is only used when an ``llm`` instance was supplied.
+        if self.llm is not None:
+            self.chain = self.prompt | self.llm | StrOutputParser()
+        else:
+            self.chain = None
+
+    # -- commentary generation ---------------------------------------------
+
+    def _generate_commentary(
+        self,
+        active_model: Optional[str],
+        *,
+        function_name: str,
+        arguments_text: str,
+        return_value_text: str,
+    ) -> str:
+        """Run the summarization step using whichever LLM path is configured."""
+
+        variables = {
+            "function_name": function_name,
+            "arguments": arguments_text,
+            "return_value": return_value_text,
+        }
+
+        if self.model is not None:
+            messages = self.prompt.format_messages(**variables)
+            model_to_use = active_model or self.model
+            response = unified_completion(
+                model=model_to_use,
+                messages=messages,
+                **self.completion_params,
+            )
+            choices = response.get("choices") or []
+            if not choices:
+                return ""
+            message = choices[0].get("message") or {}
+            return message.get("content") or ""
+
+        assert self.chain is not None  # guarded in __init__
+        return self.chain.invoke(variables)
 
     # -- ActRouter routing --------------------------------------------------
 
@@ -365,26 +439,54 @@ Function return value:
                 )
         return routing
 
+    def _apply_routing(self, routing: dict[str, Any], state: dict[str, Any]) -> None:
+        """Push the routed model onto the active LLM target (llm obj or model str)."""
+
+        chosen = routing.get("model")
+        if not chosen or not self.apply_model:
+            return
+        if self.model is not None:
+            state["active_model"] = chosen
+            routing["applied"] = True
+        else:
+            routing["applied"] = apply_model_to_llm(self.llm, chosen)
+
+    def _provider_label(self) -> str:
+        if self.llm is not None:
+            return self.llm.__class__.__name__
+        provider = _provider_from_model(self.model or "")
+        return provider or "actllminfer.completion"
+
     # -- decoration ---------------------------------------------------------
 
     def __call__(self, func: Callable[..., Any]) -> Callable[..., Any]:
         # Per-decorated-function routing state, resolved lazily on first call.
-        _state: dict[str, Any] = {"resolved": False, "routing": None}
+        _state: dict[str, Any] = {
+            "resolved": False,
+            "routing": None,
+            "active_model": self.model,
+        }
 
         def _ensure_routing() -> dict[str, Any]:
             if not _state["resolved"]:
                 _state["resolved"] = True
                 routing = self.resolve_model(func)
-                if routing.get("model") and self.apply_model:
-                    routing["applied"] = apply_model_to_llm(self.llm, routing["model"])
+                self._apply_routing(routing, _state)
                 _state["routing"] = routing
             return _state["routing"]
 
         @wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> Any:
             routing = _ensure_routing()
-            # Re-point the (possibly shared) llm at this function's model.
-            if routing.get("model") and self.apply_model:
+            # Re-point the (possibly shared) llm at this function's model on
+            # every call so concurrent decorators sharing one llm don't clobber
+            # each other. (No-op for the unified ``model=`` path — the model
+            # string lives in ``_state``.)
+            if (
+                self.llm is not None
+                and routing.get("model")
+                and self.apply_model
+            ):
                 apply_model_to_llm(self.llm, routing["model"])
 
             original_value = func(*args, **kwargs)
@@ -408,19 +510,22 @@ Function return value:
                 else:
                     arguments_text = "Not included."
 
-                commentary = self.chain.invoke(
-                    {
-                        "function_name": func.__name__,
-                        "arguments": arguments_text,
-                        "return_value": return_value_text,
-                    }
+                commentary = self._generate_commentary(
+                    _state.get("active_model"),
+                    function_name=func.__name__,
+                    arguments_text=arguments_text,
+                    return_value_text=return_value_text,
                 )
 
-                actual_model = read_model_from_llm(self.llm)
+                if self.llm is not None:
+                    actual_model = read_model_from_llm(self.llm)
+                else:
+                    actual_model = _state.get("active_model")
+
                 info = {
                     "function_name": func.__name__,
                     "summarized": True,
-                    "provider": self.llm.__class__.__name__,
+                    "provider": self._provider_label(),
                     "model": actual_model or routing.get("model"),
                     "recommended_model": routing.get("model"),
                     "routing": _routing_info(routing),
@@ -431,7 +536,10 @@ Function return value:
                     raise
 
                 commentary = f"LLM summarization failed: {exc}"
-                actual_model = read_model_from_llm(self.llm)
+                if self.llm is not None:
+                    actual_model = read_model_from_llm(self.llm)
+                else:
+                    actual_model = _state.get("active_model")
                 info = {
                     "function_name": func.__name__,
                     "summarized": False,
@@ -473,9 +581,16 @@ Function return value:
 
 
 def summarize_with_llm(
-    llm: Any,
+    llm: Any = None,
+    *,
+    model: Optional[str] = None,
     **kwargs: Any,
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-    """Convenience decorator factory for :class:`ActLLMFunctionSummarizer`."""
+    """Convenience decorator factory for :class:`ActLLMFunctionSummarizer`.
 
-    return ActLLMFunctionSummarizer(llm=llm, **kwargs)
+    Use ``model="provider/model"`` to dispatch through the unified
+    ``actllminfer.completion()`` endpoint, or pass a runnable ``llm=`` for the
+    legacy chain-style path. Exactly one must be provided.
+    """
+
+    return ActLLMFunctionSummarizer(llm=llm, model=model, **kwargs)
