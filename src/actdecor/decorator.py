@@ -86,6 +86,25 @@ def apply_model_to_llm(llm: Any, model: str) -> bool:
                 continue
     return False
 
+def read_model_from_llm(llm: Any) -> Optional[str]:
+    """Read the model ID current set for LLM client.
+    Try get_model method first then try common attribute names
+    """
+    getter = getattr(llm, "get_model", None)
+    if callable(getter):
+        try:
+            value = getter()
+            if value:
+                return str(value)
+        except Exception:
+            pass
+    
+    for attr in _MODEL_ATTRS:
+        value = getattr(llm, attr, None)
+        if value:
+            return str(value)
+        
+    return None
 
 def _routing_info(routing: dict[str, Any]) -> dict[str, Any]:
     return {
@@ -397,11 +416,13 @@ Function return value:
                     }
                 )
 
+                actual_model = read_model_from_llm(self.llm)
                 info = {
                     "function_name": func.__name__,
                     "summarized": True,
                     "provider": self.llm.__class__.__name__,
-                    "model": routing.get("model"),
+                    "model": actual_model or routing.get("model"),
+                    "recommended_model": routing.get("model"),
                     "routing": _routing_info(routing),
                 }
 
@@ -410,11 +431,13 @@ Function return value:
                     raise
 
                 commentary = f"LLM summarization failed: {exc}"
+                actual_model = read_model_from_llm(self.llm)
                 info = {
                     "function_name": func.__name__,
                     "summarized": False,
                     "error": str(exc),
-                    "model": routing.get("model"),
+                    "model": actual_model or routing.get("model"),
+                    "recommended_model": routing.get("model"),
                     "routing": _routing_info(routing),
                 }
 

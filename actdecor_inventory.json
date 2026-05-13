@@ -1,0 +1,95 @@
+{
+  "functions": {
+    "08d00207a9c5e224": {
+      "estimated_cost_usd": null,
+      "estimated_latency_ms": null,
+      "function_name": "add",
+      "module": "__main__",
+      "qualname": "add",
+      "ranking": [
+        {
+          "model_id": "gpt-5.4-mini",
+          "reasons": [
+            "task=unknown",
+            "quality_fit=0.40",
+            "tier_fit=1.00",
+            "cost_fit=0.50",
+            "latency_fit=0.50"
+          ],
+          "score": 0.5444
+        },
+        {
+          "model_id": "gpt-5.5",
+          "reasons": [
+            "task=unknown",
+            "quality_fit=0.50",
+            "tier_fit=0.75",
+            "cost_fit=0.50",
+            "latency_fit=0.50"
+          ],
+          "score": 0.5417
+        },
+        {
+          "model_id": "gpt-5-mini",
+          "reasons": [
+            "task=unknown",
+            "quality_fit=0.30",
+            "tier_fit=0.75",
+            "cost_fit=0.50",
+            "latency_fit=0.50"
+          ],
+          "score": 0.4639
+        }
+      ],
+      "recommended_model": "gpt-5.4-mini",
+      "router": "heuristic",
+      "updated_at": "2026-05-13T15:33:42.489701+00:00"
+    },
+    "c68be9d12607d6f1": {
+      "estimated_cost_usd": null,
+      "estimated_latency_ms": null,
+      "function_name": "run_etl",
+      "module": "__main__",
+      "qualname": "run_etl",
+      "ranking": [
+        {
+          "model_id": "gpt-5.4-mini",
+          "reasons": [
+            "task=unknown",
+            "quality_fit=0.40",
+            "tier_fit=1.00",
+            "cost_fit=0.50",
+            "latency_fit=0.50"
+          ],
+          "score": 0.5444
+        },
+        {
+          "model_id": "gpt-5.5",
+          "reasons": [
+            "task=unknown",
+            "quality_fit=0.50",
+            "tier_fit=0.75",
+            "cost_fit=0.50",
+            "latency_fit=0.50"
+          ],
+          "score": 0.5417
+        },
+        {
+          "model_id": "gpt-5-mini",
+          "reasons": [
+            "task=unknown",
+            "quality_fit=0.30",
+            "tier_fit=0.75",
+            "cost_fit=0.50",
+            "latency_fit=0.50"
+          ],
+          "score": 0.4639
+        }
+      ],
+      "recommended_model": "gpt-5.4-mini",
+      "router": "heuristic",
+      "updated_at": "2026-05-13T15:37:18.186378+00:00"
+    }
+  },
+  "version": 1
+}

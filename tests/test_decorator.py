@@ -4,13 +4,6 @@ import pandas as pd
 
 import pytest
 from actllminfer.runnables import RunnableLambda
-from pathlib import Path
-import sys
-
-ROOT = Path.cwd()
-SRC = ROOT / "src"
-
-sys.path.insert(0, str(SRC))
 
 from actdecor import ActLLMFunctionSummarizer, SummaryResult, summarize_with_llm
 
@@ -96,6 +89,12 @@ result = add(2, 3)
 print(result.value)        # 5
 print(result.commentary)   # real LLM output
 
+@summarize_with_llm(llm, router_url="http://127.0.0.1:8000", probe_vendors=True)
+def add(a, b):
+    return a + b
+
+
+
 raw_data = [
     {"policy_id": "P001", "premium": "$1,200 ", "province": "ON", "date": "2024-01-15"},
     {"policy_id": "P002", "premium": "$850", "province": "ON", "date": "2024-02-20"},
@@ -109,7 +108,7 @@ df_raw = pd.DataFrame(raw_data)
 # -----------------------------
 # ETL Function
 # -----------------------------
-@summarize_with_llm(llm)
+@summarize_with_llm(llm, router_url="http://127.0.0.1:8000", probe_vendors=True, estimated_prompt_tokens = 10000)
 def run_etl(df: pd.DataFrame, output_path: str = "cleaned_data.csv") -> pd.DataFrame:
     # ---- Transform ----
     df_clean = df.copy()
