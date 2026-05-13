@@ -1,16 +1,33 @@
 """ActDecor: add LLM commentary to Python function outputs.
 
+ActDecor wraps any Python function with an LLM-generated summary of its return
+value. The recommended way to point it at an LLM is the **unified endpoint**
+from :mod:`actllminfer` — pass ``model="provider/model"`` and the decorator
+dispatches each call through :func:`actllminfer.completion`. The legacy
+``llm=<runnable>`` path is preserved for backward compatibility.
+
 Optionally integrates with `ActRouter <https://github.com/jzhng105/actrouter>`_:
 the decorator can detect which major LLM vendors are usable from the current
 environment, ask ActRouter which of *those* models best fits a wrapped function,
 and cache that choice in a *function inventory file* so future calls reuse it.
 """
 
+from actllminfer import (
+    ModelResponse,
+    Router,
+    StreamingModelResponse,
+    acompletion,
+    aembedding,
+    completion,
+    embedding,
+)
+
 from .decorator import (
     ActLLMFunctionSummarizer,
     ReturnMode,
     SummaryResult,
     apply_model_to_llm,
+    read_model_from_llm,
     serialize_for_llm,
     summarize_with_llm,
 )
@@ -35,6 +52,7 @@ __all__ = [
     "ReturnMode",
     "SummaryResult",
     "apply_model_to_llm",
+    "read_model_from_llm",
     "serialize_for_llm",
     "summarize_with_llm",
     "ActRouterClient",
@@ -50,4 +68,12 @@ __all__ = [
     "available_candidate_models",
     "VENDOR_API_KEYS",
     "FALLBACK_FAMILY_MODELS",
+    # Re-exported unified endpoint from actllminfer.
+    "completion",
+    "acompletion",
+    "embedding",
+    "aembedding",
+    "Router",
+    "ModelResponse",
+    "StreamingModelResponse",
 ]
