@@ -7,10 +7,6 @@ from pathlib import Path
 
 import pytest
 
-ROOT = Path(__file__).resolve().parents[1]
-SRC = ROOT / "src"
-sys.path.insert(0, str(SRC))
-
 from actdecor import (  # noqa: E402
     ActLLMFunctionSummarizer,
     SummaryResult,
@@ -51,10 +47,8 @@ def stub_completion(monkeypatch):
 
 
 def test_model_argument_dispatches_to_unified_completion(stub_completion):
-    @summarize_with_llm(model="openai/gpt-4o-mini")
     def add(a: int, b: int) -> int:
         return a + b
-
     result = add(2, 3)
 
     assert isinstance(result, SummaryResult)
