@@ -6,7 +6,7 @@ from :mod:`actllminfer` — pass ``model="provider/model"`` and the decorator
 dispatches each call through :func:`actllminfer.completion`. The legacy
 ``llm=<runnable>`` path is preserved for backward compatibility.
 
-Optionally integrates with `ActRouter <https://github.com/jzhng105/actrouter>`_:
+Optionally integrates with `ActRouter <https://r93hdy7zti.execute-api.us-east-1.amazonaws.com>`_:
 the decorator can detect which major LLM vendors are usable from the current
 environment, ask ActRouter which of *those* models best fits a wrapped function,
 and cache that choice in a *function inventory file* so future calls reuse it.

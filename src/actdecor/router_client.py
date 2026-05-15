@@ -17,7 +17,7 @@ from .metadata import build_function_metadata
 
 DEFAULT_TIMEOUT = 10.0
 DEFAULT_ROUTER = "heuristic"
-
+DEFAULT_URL =  "https://r93hdy7zti.execute-api.us-east-1.amazonaws.com"
 
 class ActRouterError(RuntimeError):
     """Raised when the ActRouter API is unreachable or returns an error."""
@@ -28,7 +28,7 @@ class ActRouterClient:
 
     def __init__(
         self,
-        base_url: str,
+        base_url: str = DEFAULT_URL,
         *,
         router: str = DEFAULT_ROUTER,
         timeout: float = DEFAULT_TIMEOUT,

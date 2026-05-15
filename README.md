@@ -9,7 +9,7 @@ Under the hood ActDecor dispatches through the **unified endpoint** from
 ``completion()`` call across every supported provider, selected by a single
 ``provider/model`` string (LiteLLM-style).
 
-It can also ask [ActRouter](https://github.com/jzhng105/actrouter) which LLM is the best fit for the wrapped function, cache that choice in a *function inventory file*, and reuse it on subsequent calls.
+It can also ask [ActRouter](https://r93hdy7zti.execute-api.us-east-1.amazonaws.com) which LLM is the best fit for the wrapped function, cache that choice in a *function inventory file*, and reuse it on subsequent calls.
 
 ## Installation
 
@@ -76,8 +76,7 @@ Exactly one of ``model=`` / ``llm=`` must be provided.
 
 ## Routing with ActRouter
 
-Point the decorator at a running [ActRouter](https://github.com/jzhng105/actrouter)
-deployment and it will pick the model for you. ActRouter only ever receives the
+Point the decorator at a running [ActRouter](https://r93hdy7zti.execute-api.us-east-1.amazonaws.com) deployment and it will pick the model for you. ActRouter only ever receives the
 function's **static metadata** (name, signature, docstring, type hints, optional
 budgets) — never call arguments or return values.
 

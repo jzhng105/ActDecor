@@ -147,7 +147,7 @@ class ActLLMFunctionSummarizer:
       chain. This is preserved for backward compatibility and for tests that
       stub out the LLM with a ``RunnableLambda``.
 
-    Optionally consults `ActRouter <https://github.com/jzhng105/actrouter>`_ to
+    Optionally consults `ActRouter <https://r93hdy7zti.execute-api.us-east-1.amazonaws.com>`_ to
     pick the best LLM for the wrapped function. The chosen model is cached in a
     *function inventory file* (see :class:`~actdecor.inventory.FunctionInventory`)
     keyed by a stable fingerprint of the function, so future calls reuse it
