@@ -66,6 +66,23 @@ def run_report(region: str) -> dict:
 
 Exactly one of ``model=`` / ``llm=`` must be provided.
 
+
+### Provide instructions to llm
+Pass `instructions` to add task-specific guidance without rewriting the whole
+prompt template:
+
+```python
+@summarize_with_llm(
+    model="openai/gpt-4o-mini",
+    instructions="Respond in French. Flag any premium below $1,000.",
+)
+def run_report(region: str) -> dict:
+    ...
+```
+
+The text is merged into the prompt's system message on every call, so it
+composes with the default prompt — or with any custom `prompt=` you supply.
+
 ## Return modes
 
 - `"summary"`: Return only LLM commentary (`str`).
@@ -211,6 +228,7 @@ FunctionInventory().record(summarize_article, model, router="heuristic")
 | `model`              | `None`         | Unified-endpoint model id, e.g. ``"openai/gpt-4o-mini"``.      |
 | `llm`                | `None`         | Legacy: a LangChain-Core-style runnable. Exclusive with ``model=``. |
 | `completion_params`  | `None`         | Per-call kwargs forwarded to ``actllminfer.completion`` (e.g. ``temperature``, ``max_tokens``, ``tools``). |
+| `instruction`        | `None`         | Additional instruction added to prompt message template. |
 | `router_url`         | `None`         | ActRouter base URL. Enables routing when set.                  |
 | `router_client`      | `None`         | Pre-built `ActRouterClient` (overrides `router_url`).          |
 | `router`             | `"heuristic"`  | Strategy: `heuristic` \| `rules` \| `random` \| `smallest` \| `largest`. |

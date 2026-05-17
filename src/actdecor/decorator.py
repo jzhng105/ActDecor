@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Literal, Mapping, Optional, Union
 
 from actllminfer import completion as unified_completion
+from actllminfer.messages import SystemMessage
 from actllminfer.output_parsers import StrOutputParser
 from actllminfer.prompts import ChatPromptTemplate
 
@@ -21,6 +22,9 @@ log = logging.getLogger("actdecor")
 ReturnMode = Literal["summary", "original", "tuple", "dict", "object"]
 
 PathLike = Union[str, Path]
+
+# Default router url
+DEFAULT_URL =  "https://r93hdy7zti.execute-api.us-east-1.amazonaws.com"
 
 # Attributes commonly used by LLM client libraries to hold the model id.
 _MODEL_ATTRS = ("model", "model_name", "model_id")
@@ -147,6 +151,10 @@ class ActLLMFunctionSummarizer:
       chain. This is preserved for backward compatibility and for tests that
       stub out the LLM with a ``RunnableLambda``.
 
+    Pass ``instructions`` to layer task-specific guidance on top of the prompt
+    without replacing it — the text is merged into the prompt's system message
+    on every call (e.g. ``instructions="Respond in French."``).
+
     Optionally consults `ActRouter <https://r93hdy7zti.execute-api.us-east-1.amazonaws.com>`_ to
     pick the best LLM for the wrapped function. The chosen model is cached in a
     *function inventory file* (see :class:`~actdecor.inventory.FunctionInventory`)
@@ -168,8 +176,9 @@ class ActLLMFunctionSummarizer:
         include_args: bool = True,
         fail_silently: bool = False,
         prompt: Optional[ChatPromptTemplate] = None,
+        instructions: Optional[str] = None,
         # --- ActRouter integration ---------------------------------------
-        router_url: Optional[str] = None,
+        router_url: Optional[str] = DEFAULT_URL,
         router_client: Optional[ActRouterClient] = None,
         router: str = "heuristic",
         route_top_k: int = 3,
@@ -207,6 +216,7 @@ class ActLLMFunctionSummarizer:
         self.max_chars = max_chars
         self.include_args = include_args
         self.fail_silently = fail_silently
+        self.instructions = instructions
 
         # ActRouter / inventory configuration.
         if router_client is None and router_url:
@@ -273,6 +283,45 @@ Function return value:
             self.chain = None
 
     # -- commentary generation ---------------------------------------------
+    def _inject_instructions(self, messages: list) -> list:
+        """Merge ``self.instructions`` into the system message of ``messages``.
+        The extra guidance is appended to the first system message (so the
+        message order stays ``system, human, ...``); when the prompt has no
+        system message a fresh one is prepended. A no-op when no instructions
+        were configured.
+        """
+
+        if not self.instructions:
+            return messages
+        addition = f"Additional instructions:\n{self.instructions.strip()}"
+        merged: list = []
+        injected = False
+        for msg in messages:
+            if not injected and isinstance(msg, SystemMessage):
+                merged.append(SystemMessage(content=f"{msg.content}\n\n{addition}"))
+                injected = True
+            else:
+                merged.append(msg)
+        if not injected:
+            merged.insert(0, SystemMessage(content=addition))
+        return merged
+
+    def _build_messages(
+        self,
+        *,
+        function_name: str,
+        arguments_text: str,
+        return_value_text: str,
+    ) -> list:
+        """Format the prompt template and splice in any extra instructions."""
+
+        messages = self.prompt.format_messages(
+            function_name=function_name,
+            arguments=arguments_text,
+            return_value=return_value_text,
+        )
+        return self._inject_instructions(messages)
+
 
     def _generate_commentary(
         self,
@@ -284,14 +333,13 @@ Function return value:
     ) -> str:
         """Run the summarization step using whichever LLM path is configured."""
 
-        variables = {
-            "function_name": function_name,
-            "arguments": arguments_text,
-            "return_value": return_value_text,
-        }
+        messages = self._build_messages(
+            function_name=function_name,
+            arguments_text=arguments_text,
+            return_value_text=return_value_text,
+        )
 
         if self.model is not None:
-            messages = self.prompt.format_messages(**variables)
             model_to_use = active_model or self.model
             response = unified_completion(
                 model=model_to_use,
@@ -304,8 +352,8 @@ Function return value:
             message = choices[0].get("message") or {}
             return message.get("content") or ""
 
-        assert self.chain is not None  # guarded in __init__
-        return self.chain.invoke(variables)
+        output = self.llm.invoke(messages)
+        return StrOutputParser().invoke(output)
 
     # -- ActRouter routing --------------------------------------------------
 
@@ -590,7 +638,8 @@ def summarize_with_llm(
 
     Use ``model="provider/model"`` to dispatch through the unified
     ``actllminfer.completion()`` endpoint, or pass a runnable ``llm=`` for the
-    legacy chain-style path. Exactly one must be provided.
+    legacy chain-style path. Exactly one must be provided.Pass ``instructions="..."`` to
+    add task-specific guidance to the prompt's system message.
     """
 
     return ActLLMFunctionSummarizer(llm=llm, model=model, **kwargs)
