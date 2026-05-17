@@ -160,6 +160,43 @@ class FunctionInventory:
     def set_model(self, func: Callable[..., Any], model: str, *, save: bool = True) -> dict[str, Any]:
         return self.record(func, model, save=save)
 
+    # -- tool registration (OSFI E-23 style inventory) ----------------------
+
+    def register(
+        self,
+        func: Callable[..., Any],
+        registration: dict[str, Any],
+        *,
+        save: bool = True,
+    ) -> dict[str, Any]:
+        """Attach an OSFI E-23 style ``tool_registration`` block to ``func``.
+
+        Creates a function record if one does not exist yet (e.g. when routing
+        was never run), so the inventory file doubles as a model inventory.
+        """
+
+        key = self.key_for(func)
+        record = self._data["functions"].get(key)
+        if record is None:
+            record = {
+                "function_name": getattr(func, "__name__", None) or "anonymous",
+                "qualname": getattr(func, "__qualname__", None),
+                "module": getattr(func, "__module__", None),
+            }
+            self._data["functions"][key] = record
+        record["tool_registration"] = registration
+        record["registered_at"] = datetime.now(timezone.utc).isoformat()
+        if save:
+            self.save()
+        return record
+
+    def get_registration(self, func: Callable[..., Any]) -> Optional[dict[str, Any]]:
+        record = self.get(func)
+        return record.get("tool_registration") if record else None
+
+    def is_registered(self, func: Callable[..., Any]) -> bool:
+        return self.get_registration(func) is not None
+
     def remove(self, func: Callable[..., Any], *, save: bool = True) -> bool:
         existed = self._data["functions"].pop(self.key_for(func), None) is not None
         if existed and save:

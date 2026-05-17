@@ -221,6 +221,75 @@ model = client.recommend_model(
 FunctionInventory().record(summarize_article, model, router="heuristic")
 ```
 
+## Tool registration (OSFI E-23)
+
+Set `register_tool=True` and the decorator adds a light registration layer: the
+first time a wrapped function runs, the same LLM that writes the commentary also
+produces a structured *tool registration* record describing the function as a
+model/tool. The fields mirror what [OSFI Guideline E-23 (Model Risk
+Management)](https://www.osfi-bsif.gc.ca/) expects an institution's model
+inventory to capture, so `actdecor_inventory.json` doubles as a lightweight
+model inventory.
+
+```python
+from actdecor import summarize_with_llm
+
+@summarize_with_llm(model="openai/gpt-4o-mini", register_tool=True)
+def calculate_loss_ratio(earned_premium: float, incurred_losses: float) -> dict:
+    """Compute the loss ratio for an accident quarter."""
+    return {"loss_ratio": incurred_losses / earned_premium}
+
+result = calculate_loss_ratio(1_000_000, 700_000)
+print(result.info["tool_registration"])
+```
+
+The registration is best-effort: descriptive and judgement fields are filled
+from the LLM response, while identity, ownership and lifecycle fields are filled
+deterministically from the function's static metadata. Anything that cannot be
+determined is left as `null` so gaps are visible rather than guessed.
+
+Stored fields (under `tool_registration` in each inventory record):
+
+| Source        | Fields                                                                                                                                 |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------------- |
+| Static        | `tool_id`, `name`, `qualname`, `module`, `signature`, `owner`, `developer`, `lifecycle_stage`, `status`, `vendor_or_internal`, `date_registered`, `last_reviewed`, `next_review_due`, `registered_by_model` |
+| LLM-generated | `description`, `intended_use`, `model_type`, `methodology`, `inputs`, `outputs`, `data_sources`, `assumptions`, `limitations`, `risk_rating`, `risk_rationale`, `materiality`, `dependencies`, `downstream_use`, `regulatory_use` |
+
+The record is persisted into the function inventory file keyed by the same
+fingerprint used for routing, so the LLM round-trip only happens once — later
+calls (including in a fresh process) reuse the stored registration.
+
+```json
+{
+  "version": 1,
+  "functions": {
+    "4626f3bb7bc4ccfa": {
+      "function_name": "calculate_loss_ratio",
+      "tool_registration": {
+        "tool_id": "4626f3bb7bc4ccfa",
+        "name": "calculate_loss_ratio",
+        "description": "Computes the loss ratio for an accident quarter.",
+        "model_type": "deterministic calculation",
+        "risk_rating": "medium",
+        "regulatory_use": "yes",
+        "status": "registered",
+        "lifecycle_stage": "in_use",
+        "date_registered": "2026-05-17T00:00:00+00:00"
+      }
+    }
+  }
+}
+```
+
+You can also build a registration record directly:
+
+```python
+from actdecor import build_registration_record, extract_registration_fields
+
+llm_fields = extract_registration_fields(llm_response_text)
+record = build_registration_record(calculate_loss_ratio, llm_fields)
+```
+
 ### Decorator options
 
 | Argument             | Default        | Purpose                                                        |
@@ -240,6 +309,7 @@ FunctionInventory().record(summarize_article, model, router="heuristic")
 | `use_inventory`      | `True`         | Whether to read/write the inventory file.                      |
 | `inventory`          | `None`         | Inventory file path or `FunctionInventory` instance.           |
 | `route_fail_silently`| `True`         | Swallow ActRouter errors and keep the original model.          |
+| `register_tool`      | `False`        | Generate an OSFI E-23 style tool registration record and store it in the inventory. |
 | `restrict_to_available_vendors` | `True` | Limit candidate models to vendors usable from this environment. |
 | `probe_vendors`      | `False`        | Also ping each vendor's API (not just check env vars).         |
 | `vendor_probe_timeout` | `3.0`        | Per-vendor probe timeout, seconds.                             |
@@ -257,6 +327,9 @@ FunctionInventory().record(summarize_article, model, router="heuristic")
 - `FunctionInventory(path=None)` — JSON-backed function → model hash map.
 - `build_function_metadata(func, ...)` — static, privacy-safe metadata for ActRouter.
 - `function_fingerprint(func)` — stable inventory key for a function.
+- `build_registration_record(func, llm_fields=None, ...)` — assemble an OSFI E-23 style tool registration record.
+- `extract_registration_fields(text)` — parse the E-23 fields out of an LLM response.
+- `E23_REGISTRATION_FIELDS`, `E23_LLM_FIELDS` — the registration field sets.
 - `apply_model_to_llm(llm, model)` / `read_model_from_llm(llm)` — best-effort model setter/getter for legacy runnables.
 - `default_inventory_path()` — resolves the default inventory file location.
 - `detect_available_vendors(*, probe=False, ...)` — vendor/family names usable here.

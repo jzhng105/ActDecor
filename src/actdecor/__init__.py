@@ -38,6 +38,12 @@ from .inventory import (
     default_inventory_path,
 )
 from .metadata import build_function_metadata, function_fingerprint
+from .registration import (
+    E23_LLM_FIELDS,
+    E23_REGISTRATION_FIELDS,
+    build_registration_record,
+    extract_registration_fields,
+)
 from .router_client import ActRouterClient, ActRouterError
 from .vendors import (
     FALLBACK_FAMILY_MODELS,
@@ -63,6 +69,10 @@ __all__ = [
     "DEFAULT_INVENTORY_FILENAME",
     "build_function_metadata",
     "function_fingerprint",
+    "build_registration_record",
+    "extract_registration_fields",
+    "E23_LLM_FIELDS",
+    "E23_REGISTRATION_FIELDS",
     "detect_available_vendors",
     "probe_vendor",
     "available_candidate_models",

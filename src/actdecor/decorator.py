@@ -14,6 +14,11 @@ from actllminfer.output_parsers import StrOutputParser
 from actllminfer.prompts import ChatPromptTemplate
 
 from .inventory import FunctionInventory
+from .registration import (
+    build_registration_messages,
+    build_registration_record,
+    extract_registration_fields,
+)
 from .router_client import ActRouterClient
 from .vendors import available_candidate_models, detect_available_vendors
 
@@ -189,6 +194,8 @@ class ActLLMFunctionSummarizer:
         use_inventory: bool = True,
         inventory: Optional[Union[FunctionInventory, PathLike]] = None,
         route_fail_silently: bool = True,
+        # --- OSFI E-23 style tool registration ---------------------------
+        register_tool: bool = False,
         # --- restrict candidates to locally usable vendors ---------------
         restrict_to_available_vendors: bool = True,
         probe_vendors: bool = False,
@@ -230,6 +237,7 @@ class ActLLMFunctionSummarizer:
         self.auto_route = auto_route
         self.apply_model = apply_model
         self.route_fail_silently = route_fail_silently
+        self.register_tool = register_tool
 
         # Restrict candidate models to vendors the caller can actually use.
         self.restrict_to_available_vendors = restrict_to_available_vendors
@@ -323,21 +331,8 @@ Function return value:
         return self._inject_instructions(messages)
 
 
-    def _generate_commentary(
-        self,
-        active_model: Optional[str],
-        *,
-        function_name: str,
-        arguments_text: str,
-        return_value_text: str,
-    ) -> str:
-        """Run the summarization step using whichever LLM path is configured."""
-
-        messages = self._build_messages(
-            function_name=function_name,
-            arguments_text=arguments_text,
-            return_value_text=return_value_text,
-        )
+    def _run_llm(self, messages: list, *, active_model: Optional[str] = None) -> str:
+        """Invoke the configured LLM (unified endpoint or legacy runnable)."""
 
         if self.model is not None:
             model_to_use = active_model or self.model
@@ -354,6 +349,103 @@ Function return value:
 
         output = self.llm.invoke(messages)
         return StrOutputParser().invoke(output)
+
+    def _generate_commentary(
+        self,
+        active_model: Optional[str],
+        *,
+        function_name: str,
+        arguments_text: str,
+        return_value_text: str,
+    ) -> str:
+        """Run the summarization step using whichever LLM path is configured."""
+
+        messages = self._build_messages(
+            function_name=function_name,
+            arguments_text=arguments_text,
+            return_value_text=return_value_text,
+        )
+        return self._run_llm(messages, active_model=active_model)
+
+    # -- OSFI E-23 tool registration ---------------------------------------
+
+    def _generate_registration(
+        self,
+        func: Callable[..., Any],
+        *,
+        active_model: Optional[str],
+        arguments_text: str,
+        return_value_text: str,
+    ) -> dict[str, Any]:
+        """Ask the LLM to describe ``func`` and build an E-23 registration record.
+
+        Best-effort: if the LLM call or JSON parsing fails, a record is still
+        produced from static metadata so identity/lifecycle fields are present.
+        """
+
+        llm_fields: dict[str, Any] = {}
+        try:
+            messages = build_registration_messages(
+                func,
+                arguments_text=arguments_text,
+                return_value_text=return_value_text,
+            )
+            raw = self._run_llm(messages, active_model=active_model)
+            llm_fields = extract_registration_fields(raw)
+        except Exception as exc:
+            log.warning(
+                "ActDecor tool registration LLM call failed for %s: %s",
+                getattr(func, "__name__", func),
+                exc,
+            )
+
+        if self.model is not None:
+            model_id: Optional[str] = active_model or self.model
+        else:
+            model_id = read_model_from_llm(self.llm)
+        return build_registration_record(func, llm_fields, model=model_id)
+
+    def _ensure_registration(
+        self,
+        func: Callable[..., Any],
+        *,
+        active_model: Optional[str],
+        arguments_text: str,
+        return_value_text: str,
+        state: dict[str, Any],
+    ) -> Optional[dict[str, Any]]:
+        """Resolve (once) the E-23 registration for ``func`` and persist it.
+
+        Reuses a registration already stored in the inventory, so the LLM call
+        only happens the first time the function is ever registered.
+        """
+
+        if state.get("registration") is not None:
+            return state["registration"]
+        if self.inventory is None:
+            return None
+
+        existing = self.inventory.get_registration(func)
+        if existing is not None:
+            state["registration"] = existing
+            return existing
+
+        registration = self._generate_registration(
+            func,
+            active_model=active_model,
+            arguments_text=arguments_text,
+            return_value_text=return_value_text,
+        )
+        state["registration"] = registration
+        try:
+            self.inventory.register(func, registration)
+        except OSError as exc:  # pragma: no cover - filesystem dependent
+            log.warning(
+                "Could not persist ActDecor tool registration at %s: %s",
+                getattr(self.inventory, "path", "?"),
+                exc,
+            )
+        return registration
 
     # -- ActRouter routing --------------------------------------------------
 
@@ -513,6 +605,7 @@ Function return value:
             "resolved": False,
             "routing": None,
             "active_model": self.model,
+            "registration": None,
         }
 
         def _ensure_routing() -> dict[str, Any]:
@@ -565,6 +658,16 @@ Function return value:
                     return_value_text=return_value_text,
                 )
 
+                registration = None
+                if self.register_tool:
+                    registration = self._ensure_registration(
+                        func,
+                        active_model=_state.get("active_model"),
+                        arguments_text=arguments_text,
+                        return_value_text=return_value_text,
+                        state=_state,
+                    )
+
                 if self.llm is not None:
                     actual_model = read_model_from_llm(self.llm)
                 else:
@@ -577,6 +680,7 @@ Function return value:
                     "model": actual_model or routing.get("model"),
                     "recommended_model": routing.get("model"),
                     "routing": _routing_info(routing),
+                    "tool_registration": registration,
                 }
 
             except Exception as exc:
