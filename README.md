@@ -228,7 +228,7 @@ FunctionInventory().record(summarize_article, model, router="heuristic")
 | `model`              | `None`         | Unified-endpoint model id, e.g. ``"openai/gpt-4o-mini"``.      |
 | `llm`                | `None`         | Legacy: a LangChain-Core-style runnable. Exclusive with ``model=``. |
 | `completion_params`  | `None`         | Per-call kwargs forwarded to ``actllminfer.completion`` (e.g. ``temperature``, ``max_tokens``, ``tools``). |
-| `instruction`        | `None`         | Additional instruction added to prompt message template. |
+| `instructions`        | `None`         | Additional instruction added to prompt message template. |
 | `router_url`         | `None`         | ActRouter base URL. Enables routing when set.                  |
 | `router_client`      | `None`         | Pre-built `ActRouterClient` (overrides `router_url`).          |
 | `router`             | `"heuristic"`  | Strategy: `heuristic` \| `rules` \| `random` \| `smallest` \| `largest`. |
