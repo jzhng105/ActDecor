@@ -79,21 +79,14 @@ llm = ChatOpenAI(
     temperature=0,
 )
 
-@summarize_with_llm(llm)
+@summarize_with_llm(llm, router_url="https://r93hdy7zti.execute-api.us-east-1.amazonaws.com/", probe_vendors=True)
 def add(a, b):
     return a + b
-
 
 result = add(2, 3)
 
 print(result.value)        # 5
 print(result.commentary)   # real LLM output
-
-@summarize_with_llm(llm, router_url="http://127.0.0.1:8000", probe_vendors=True)
-def add(a, b):
-    return a + b
-
-
 
 raw_data = [
     {"policy_id": "P001", "premium": "$1,200 ", "province": "ON", "date": "2024-01-15"},
@@ -108,7 +101,7 @@ df_raw = pd.DataFrame(raw_data)
 # -----------------------------
 # ETL Function
 # -----------------------------
-@summarize_with_llm(llm, router_url="http://127.0.0.1:8000", probe_vendors=True, estimated_prompt_tokens = 10000)
+@summarize_with_llm(llm, router_url="https://r93hdy7zti.execute-api.us-east-1.amazonaws.com/", probe_vendors=True, route_hints={"task_kind": "summarization", "cost_budget_usd": 0.05})
 def run_etl(df: pd.DataFrame, output_path: str = "cleaned_data.csv") -> pd.DataFrame:
     # ---- Transform ----
     df_clean = df.copy()
@@ -139,4 +132,5 @@ def run_etl(df: pd.DataFrame, output_path: str = "cleaned_data.csv") -> pd.DataF
 
 result = run_etl(df_raw)
 result.commentary
+result.info["routing"]
 result.value
