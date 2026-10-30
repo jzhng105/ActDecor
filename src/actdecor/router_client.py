@@ -26,7 +26,14 @@ from .metadata import build_function_metadata
 DEFAULT_TIMEOUT = 10.0
 DEFAULT_ROUTER = "heuristic"
 
-__all__ = ["ActRouterClient", "ActRouterError", "DEFAULT_URL", "configured_api_key", "configured_url"]
+__all__ = [
+    "ActRouterClient",
+    "ActRouterError",
+    "DEFAULT_URL",
+    "configured_api_key",
+    "configured_url",
+    "is_hosted",
+]
 
 
 def configured_api_key(api_key: Optional[str] = None) -> Optional[str]:
@@ -39,6 +46,12 @@ def configured_url(base_url: Optional[str] = None) -> Optional[str]:
     """``base_url`` if given, else ``ACTROUTER_URL``, else None."""
 
     return base_url or env("ACTROUTER_URL")
+
+
+def is_hosted(url: str) -> bool:
+    """Whether ``url`` is the hosted ActRouter, which requires an API key."""
+
+    return url.rstrip("/") == DEFAULT_URL.rstrip("/")
 
 
 class ActRouterClient:

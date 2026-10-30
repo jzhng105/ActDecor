@@ -105,13 +105,15 @@ Routing is on by default for anyone with a key and off for everyone else:
 
 | You set | Routing |
 | --- | --- |
-| `ACTROUTER_API_KEY` (or `router_api_key=`) | On, against the hosted ActRouter |
-| `ACTROUTER_URL` (or `router_url=`), no key | On, against that address (e.g. a self-hosted deployment) |
+| `ACTROUTER_API_KEY` (or `router_api_key=`) | On, against the hosted ActRouter (`router_url`'s default) |
+| `ACTROUTER_URL` (or `router_url=`) set to another address, no key | On, against that address (e.g. a self-hosted deployment) |
 | `router_client=` | On, with that client |
 | none of these | Off: the function uses the model you gave it and ActDecor makes no ActRouter calls |
 
-`auto_route=False` turns routing off even when a key is set. Without a key,
-models already recorded in the inventory file are still used.
+The hosted API needs a key, so without one ActDecor never calls it.
+`auto_route=False` or `router_url=None` turns routing off even when a key is
+set. Without a key, models already recorded in the inventory file are still
+used.
 
 ```bash
 export ACTROUTER_API_KEY=ar_live_...
@@ -248,8 +250,8 @@ FunctionInventory().record(summarize_article, model, router="heuristic")
 | `llm`                | `None`         | Legacy: a LangChain-Core-style runnable. Exclusive with ``model=``. |
 | `completion_params`  | `None`         | Per-call kwargs forwarded to ``actllminfer.completion`` (e.g. ``temperature``, ``max_tokens``, ``tools``). |
 | `instructions`        | `None`         | Additional instruction added to prompt message template. |
-| `router_url`         | `None`         | ActRouter base URL (default: `ACTROUTER_URL`, else the hosted API). Enables routing when set. |
-| `router_api_key`     | `None`         | ActRouter API key (default: `ACTROUTER_API_KEY`). Enables routing when set. |
+| `router_url`         | hosted API     | ActRouter base URL, `https://r93hdy7zti.execute-api.us-east-1.amazonaws.com` (`ACTROUTER_URL` overrides the default). The hosted API is only called with a key; any other address enables routing. `None` disables routing. |
+| `router_api_key`     | `None`         | ActRouter API key (default: `ACTROUTER_API_KEY`). Enables routing against the hosted API. |
 | `router_client`      | `None`         | Pre-built `ActRouterClient` (overrides `router_url`).          |
 | `router`             | `"heuristic"`  | Strategy: `heuristic` \| `rules` \| `random` \| `smallest` \| `largest`. |
 | `route_top_k`        | `3`            | How many ranked candidates to request.                         |

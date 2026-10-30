@@ -14,7 +14,7 @@ from actllminfer.output_parsers import StrOutputParser
 from actllminfer.prompts import ChatPromptTemplate
 
 from .inventory import FunctionInventory
-from .router_client import ActRouterClient, configured_api_key, configured_url
+from .router_client import DEFAULT_URL, ActRouterClient, configured_api_key, configured_url, is_hosted
 from .vendors import available_candidate_models, detect_available_vendors
 
 log = logging.getLogger("actdecor")
@@ -158,11 +158,12 @@ class ActLLMFunctionSummarizer:
     keyed by a stable fingerprint of the function, so future calls reuse it
     without another round-trip to ActRouter.
 
-    Routing is on when an ActRouter API key is configured (``router_api_key=``
-    or ``ACTROUTER_API_KEY``), a router address is given (``router_url=`` or
-    ``ACTROUTER_URL``, e.g. a self-hosted deployment), or ``router_client=``
-    is passed. Otherwise the function runs on the model it was given, with no
-    calls to ActRouter.
+    ``router_url`` defaults to the hosted ActRouter, which is only called when
+    an API key is configured (``router_api_key=`` or ``ACTROUTER_API_KEY``).
+    Any other address (``router_url=`` or ``ACTROUTER_URL``, e.g. a
+    self-hosted deployment) is called with or without a key, and
+    ``router_client=`` is always used. Otherwise, or with ``router_url=None``,
+    the function runs on the model it was given, with no calls to ActRouter.
     """
 
     def __init__(
@@ -181,7 +182,7 @@ class ActLLMFunctionSummarizer:
         prompt: Optional[ChatPromptTemplate] = None,
         instructions: Optional[str] = None,
         # --- ActRouter integration ---------------------------------------
-        router_url: Optional[str] = None,
+        router_url: Optional[str] = DEFAULT_URL,
         router_api_key: Optional[str] = None,
         router_client: Optional[ActRouterClient] = None,
         router: str = "heuristic",
@@ -223,10 +224,13 @@ class ActLLMFunctionSummarizer:
         self.instructions = instructions
 
         # ActRouter / inventory configuration.
-        if router_client is None and (
-            configured_api_key(router_api_key) or configured_url(router_url)
-        ):
-            router_client = ActRouterClient(router_url, api_key=router_api_key, router=router)
+        if router_client is None and router_url:
+            if is_hosted(router_url):
+                # ACTROUTER_URL still takes precedence over the default.
+                router_url = configured_url() or router_url
+            # The hosted API rejects requests without a key, so skip it unless one is set.
+            if configured_api_key(router_api_key) or not is_hosted(router_url):
+                router_client = ActRouterClient(router_url, api_key=router_api_key, router=router)
         self.router_client = router_client
         self.router = router
         self.route_top_k = route_top_k

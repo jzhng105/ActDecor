@@ -268,6 +268,34 @@ def test_routing_on_with_key_argument():
     assert client.headers["x-api-key"] == "ar_live_arg"
 
 
+def test_router_url_defaults_to_hosted_api():
+    import inspect
+
+    from actdecor import ActLLMFunctionSummarizer
+    from actdecor.router_client import DEFAULT_URL
+
+    default = inspect.signature(ActLLMFunctionSummarizer).parameters["router_url"].default
+    assert default == DEFAULT_URL
+
+
+def test_hosted_url_without_key_stays_off():
+    from actdecor.router_client import DEFAULT_URL
+
+    assert _summarizer(router_url=DEFAULT_URL + "/").router_client is None
+
+
+def test_router_url_none_turns_routing_off(monkeypatch):
+    monkeypatch.setenv("ACTROUTER_API_KEY", "ar_live_env")
+    assert _summarizer(router_url=None).router_client is None
+
+
+def test_actrouter_url_environment_overrides_default(monkeypatch):
+    monkeypatch.setenv("ACTROUTER_URL", "http://127.0.0.1:9000")
+    client = _summarizer().router_client
+    assert client.base_url == "http://127.0.0.1:9000"
+    assert "x-api-key" not in client.headers
+
+
 def test_routing_on_with_url_and_no_key():
     client = _summarizer(router_url="http://127.0.0.1:8000").router_client
     assert client.base_url == "http://127.0.0.1:8000"
