@@ -1,25 +1,57 @@
-"""A tiny, dependency-free HTTP client for the ActRouter API.
+"""ActDecor's client for the ActRouter API.
 
 ActRouter exposes ``POST /v1/route`` which takes *function metadata only* and
 returns the recommended LLM for that function. This client builds the metadata
-payload from a Python callable and calls the endpoint using the standard
-library, so ``actdecor`` does not gain a hard dependency on ``requests``.
+payload from a Python callable and sends it through
+:class:`actrouter_client.HttpRouter`, so ActDecor shares the transport (API key
+header, plan-limit and bad-key messages, refusing redirects) with the other
+ActRouter tools.
+
+Settings not passed explicitly come from the environment, as they do for
+``actrouter-client``:
+
+* ``ACTROUTER_API_KEY`` -- your API key, sent as ``x-api-key``.
+* ``ACTROUTER_URL`` -- the API's base URL; unset means the hosted ActRouter.
 """
 
 from __future__ import annotations
 
-import json
-import urllib.error
-import urllib.request
 from typing import Any, Callable, Optional
+
+from actrouter_client import DEFAULT_URL, ActRouterError, HttpRouter
+from actrouter_client.client import env
 
 from .metadata import build_function_metadata
 
 DEFAULT_TIMEOUT = 10.0
 DEFAULT_ROUTER = "heuristic"
 
-class ActRouterError(RuntimeError):
-    """Raised when the ActRouter API is unreachable or returns an error."""
+__all__ = [
+    "ActRouterClient",
+    "ActRouterError",
+    "DEFAULT_URL",
+    "configured_api_key",
+    "configured_url",
+    "is_hosted",
+]
+
+
+def configured_api_key(api_key: Optional[str] = None) -> Optional[str]:
+    """``api_key`` if given, else ``ACTROUTER_API_KEY``, else None."""
+
+    return api_key or env("ACTROUTER_API_KEY")
+
+
+def configured_url(base_url: Optional[str] = None) -> Optional[str]:
+    """``base_url`` if given, else ``ACTROUTER_URL``, else None."""
+
+    return base_url or env("ACTROUTER_URL")
+
+
+def is_hosted(url: str) -> bool:
+    """Whether ``url`` is the hosted ActRouter, which requires an API key."""
+
+    return url.rstrip("/") == DEFAULT_URL.rstrip("/")
 
 
 class ActRouterClient:
@@ -27,20 +59,23 @@ class ActRouterClient:
 
     def __init__(
         self,
-        base_url: str,
+        base_url: Optional[str] = None,
         *,
+        api_key: Optional[str] = None,
         router: str = DEFAULT_ROUTER,
         timeout: float = DEFAULT_TIMEOUT,
         headers: Optional[dict[str, str]] = None,
     ) -> None:
-        if not base_url:
-            raise ValueError("base_url is required for ActRouterClient")
-        self.base_url = base_url.rstrip("/")
+        self.base_url = (configured_url(base_url) or DEFAULT_URL).rstrip("/")
         self.router = router
         self.timeout = timeout
-        self.headers = {"content-type": "application/json", "accept": "application/json"}
+        merged: dict[str, str] = {}
+        if key := configured_api_key(api_key):
+            merged["x-api-key"] = key
         if headers:
-            self.headers.update(headers)
+            merged.update(headers)
+        self._http = HttpRouter(self.base_url, timeout=timeout, headers=merged)
+        self.headers = self._http.headers
 
     # -- public API ---------------------------------------------------------
 
@@ -55,14 +90,12 @@ class ActRouterClient:
     ) -> dict[str, Any]:
         """Ask ActRouter which model ``func`` should use; returns the full response."""
 
-        payload: dict[str, Any] = {
-            "function": build_function_metadata(func, **metadata_hints),
-            "router": router or self.router,
-            "top_k": top_k,
-        }
-        if candidate_models is not None:
-            payload["candidate_models"] = list(candidate_models)
-        return self._request("POST", "/v1/route", payload)
+        return self._http.route_function(
+            build_function_metadata(func, **metadata_hints),
+            router=router or self.router,
+            candidate_models=list(candidate_models) if candidate_models is not None else None,
+            top_k=top_k,
+        )
 
     def recommend_model(self, func: Callable[..., Any], **kwargs: Any) -> str:
         """Convenience wrapper returning only ``chosen_model``."""
@@ -74,33 +107,4 @@ class ActRouterClient:
         return model
 
     def list_models(self) -> list[dict[str, Any]]:
-        response = self._request("GET", "/v1/models", None)
-        data = response.get("data")
-        return list(data) if isinstance(data, list) else []
-
-    # -- transport ----------------------------------------------------------
-
-    def _request(self, method: str, path: str, payload: Optional[dict[str, Any]]) -> dict[str, Any]:
-        url = f"{self.base_url}{path}"
-        data = json.dumps(payload).encode("utf-8") if payload is not None else None
-        request = urllib.request.Request(url, data=data, headers=self.headers, method=method)
-        try:
-            with urllib.request.urlopen(request, timeout=self.timeout) as resp:
-                raw = resp.read().decode("utf-8")
-        except urllib.error.HTTPError as exc:  # 4xx / 5xx
-            body = ""
-            try:
-                body = exc.read().decode("utf-8", errors="replace")
-            except Exception:  # pragma: no cover - defensive
-                pass
-            raise ActRouterError(f"ActRouter returned HTTP {exc.code} for {url}: {body}") from exc
-        except urllib.error.URLError as exc:  # DNS / connection / timeout
-            raise ActRouterError(f"Could not reach ActRouter at {url}: {exc.reason}") from exc
-
-        try:
-            parsed = json.loads(raw)
-        except json.JSONDecodeError as exc:
-            raise ActRouterError(f"ActRouter returned non-JSON response from {url}: {raw!r}") from exc
-        if not isinstance(parsed, dict):
-            raise ActRouterError(f"ActRouter returned unexpected payload from {url}: {parsed!r}")
-        return parsed
+        return self._http.list_models()

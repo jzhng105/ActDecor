@@ -17,6 +17,10 @@ It can also ask [ActRouter](https://r93hdy7zti.execute-api.us-east-1.amazonaws.c
 pip install -e .
 ```
 
+This also installs [actrouter-client](https://github.com/jzhng105/actrouter-client),
+which ActDecor uses to talk to ActRouter. Routing stays off until you give it an
+ActRouter API key (see [Routing with ActRouter](#routing-with-actrouter)).
+
 ## Quick start (unified endpoint)
 
 ```python
@@ -93,16 +97,33 @@ composes with the default prompt — or with any custom `prompt=` you supply.
 
 ## Routing with ActRouter
 
-Point the decorator at a running [ActRouter](https://r93hdy7zti.execute-api.us-east-1.amazonaws.com) deployment and it will pick the model for you. ActRouter only ever receives the
+Give ActDecor an [ActRouter](https://r93hdy7zti.execute-api.us-east-1.amazonaws.com) API key and it will pick the model for you. ActRouter only ever receives the
 function's **static metadata** (name, signature, docstring, type hints, optional
 budgets) — never call arguments or return values.
+
+Routing is on by default for anyone with a key and off for everyone else:
+
+| You set | Routing |
+| --- | --- |
+| `ACTROUTER_API_KEY` (or `router_api_key=`) | On, against the hosted ActRouter (`router_url`'s default) |
+| `ACTROUTER_URL` (or `router_url=`) set to another address, no key | On, against that address (e.g. a self-hosted deployment) |
+| `router_client=` | On, with that client |
+| none of these | Off: the function uses the model you gave it and ActDecor makes no ActRouter calls |
+
+The hosted API needs a key, so without one ActDecor never calls it.
+`auto_route=False` or `router_url=None` turns routing off even when a key is
+set. Without a key, models already recorded in the inventory file are still
+used.
+
+```bash
+export ACTROUTER_API_KEY=ar_live_...
+```
 
 ```python
 from actdecor import summarize_with_llm
 
 @summarize_with_llm(
     model="openai/gpt-4o-mini",                # initial / fallback model
-    router_url="https://<your-actrouter>",     # ActRouter base URL
     router="heuristic",                        # routing strategy
     route_hints={"task_kind": "summarization", "cost_budget_usd": 0.05},
 )
@@ -202,7 +223,7 @@ You can also probe / map vendors directly:
 from actdecor import detect_available_vendors, available_candidate_models, ActRouterClient
 
 vendors = detect_available_vendors(probe=True)            # {'openai', 'anthropic'}
-client = ActRouterClient("https://<your-actrouter>")
+client = ActRouterClient()                  # ACTROUTER_API_KEY / ACTROUTER_URL from the environment
 candidates = available_candidate_models(vendors, router_client=client)
 ```
 
@@ -211,7 +232,7 @@ You can also drive routing manually:
 ```python
 from actdecor import ActRouterClient, FunctionInventory
 
-client = ActRouterClient("https://<your-actrouter>")
+client = ActRouterClient(api_key="ar_live_...")
 model = client.recommend_model(
     summarize_article,
     task_kind="summarization",
@@ -229,7 +250,8 @@ FunctionInventory().record(summarize_article, model, router="heuristic")
 | `llm`                | `None`         | Legacy: a LangChain-Core-style runnable. Exclusive with ``model=``. |
 | `completion_params`  | `None`         | Per-call kwargs forwarded to ``actllminfer.completion`` (e.g. ``temperature``, ``max_tokens``, ``tools``). |
 | `instructions`        | `None`         | Additional instruction added to prompt message template. |
-| `router_url`         | `None`         | ActRouter base URL. Enables routing when set.                  |
+| `router_url`         | hosted API     | ActRouter base URL, `https://r93hdy7zti.execute-api.us-east-1.amazonaws.com` (`ACTROUTER_URL` overrides the default). The hosted API is only called with a key; any other address enables routing. `None` disables routing. |
+| `router_api_key`     | `None`         | ActRouter API key (default: `ACTROUTER_API_KEY`). Enables routing against the hosted API. |
 | `router_client`      | `None`         | Pre-built `ActRouterClient` (overrides `router_url`).          |
 | `router`             | `"heuristic"`  | Strategy: `heuristic` \| `rules` \| `random` \| `smallest` \| `largest`. |
 | `route_top_k`        | `3`            | How many ranked candidates to request.                         |
@@ -252,8 +274,8 @@ FunctionInventory().record(summarize_article, model, router="heuristic")
 - `ActLLMFunctionSummarizer(llm=None, *, model=None, **kwargs)` — decorator class.
 - `serialize_for_llm(value, max_chars=12000)` — serialization helper.
 - `SummaryResult` — dataclass response object.
-- `ActRouterClient(base_url, ...)` — HTTP client for ActRouter (`route`, `recommend_model`, `list_models`).
-- `ActRouterError` — raised when ActRouter is unreachable or errors.
+- `ActRouterClient(base_url=None, *, api_key=None, ...)` — HTTP client for ActRouter (`route`, `recommend_model`, `list_models`); unset arguments come from `ACTROUTER_URL` / `ACTROUTER_API_KEY`.
+- `ActRouterError` — raised when ActRouter is unreachable or errors (`actrouter_client.ActRouterError`; `.status` holds the HTTP status).
 - `FunctionInventory(path=None)` — JSON-backed function → model hash map.
 - `build_function_metadata(func, ...)` — static, privacy-safe metadata for ActRouter.
 - `function_fingerprint(func)` — stable inventory key for a function.

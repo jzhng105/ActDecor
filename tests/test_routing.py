@@ -137,6 +137,10 @@ def test_apply_model_noop_when_unknown_shape():
 # ---------------------------------------------------------------------------
 
 
+# actrouter-client sends every request through this opener (it refuses redirects).
+_OPENER = "actrouter_client.client._opener.open"
+
+
 class _FakeResponse:
     def __init__(self, body: bytes):
         self._body = body
@@ -170,7 +174,7 @@ def test_router_client_route(monkeypatch):
             ).encode("utf-8")
         )
 
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr(_OPENER, fake_urlopen)
 
     client = ActRouterClient("https://api.example.com/")
     model = client.recommend_model(example_fn, task_kind="extraction")
@@ -189,9 +193,128 @@ def test_router_client_wraps_network_errors(monkeypatch):
     def boom(request, timeout=None):
         raise urllib.error.URLError("no route to host")
 
-    monkeypatch.setattr("urllib.request.urlopen", boom)
+    monkeypatch.setattr(_OPENER, boom)
     with pytest.raises(ActRouterError):
         ActRouterClient("https://api.example.com").recommend_model(example_fn)
+
+
+def test_router_client_sends_api_key(monkeypatch):
+    seen = {}
+
+    def fake_urlopen(request, timeout=None):
+        seen["key"] = request.get_header("X-api-key")
+        return _FakeResponse(b'{"chosen_model": "m"}')
+
+    monkeypatch.setattr(_OPENER, fake_urlopen)
+    ActRouterClient("https://api.example.com", api_key="ar_live_x").recommend_model(example_fn)
+    assert seen["key"] == "ar_live_x"
+
+
+def test_router_client_reads_environment(monkeypatch):
+    monkeypatch.setenv("ACTROUTER_API_KEY", "ar_live_env")
+    monkeypatch.setenv("ACTROUTER_URL", "https://self-hosted.example.com/")
+    client = ActRouterClient()
+    assert client.base_url == "https://self-hosted.example.com"
+    assert client.headers["x-api-key"] == "ar_live_env"
+
+
+def test_router_client_defaults_to_hosted_api():
+    from actdecor.router_client import DEFAULT_URL
+
+    client = ActRouterClient()
+    assert client.base_url == DEFAULT_URL
+    assert "x-api-key" not in client.headers
+
+
+def test_router_client_explains_missing_key(monkeypatch):
+    import io
+    import urllib.error
+
+    def unauthorized(request, timeout=None):
+        raise urllib.error.HTTPError(request.full_url, 401, "Unauthorized", {}, io.BytesIO(b"{}"))
+
+    monkeypatch.setattr(_OPENER, unauthorized)
+    with pytest.raises(ActRouterError, match="ACTROUTER_API_KEY") as info:
+        ActRouterClient("https://api.example.com").recommend_model(example_fn)
+    assert info.value.status == 401
+
+
+# ---------------------------------------------------------------------------
+# when routing is on
+# ---------------------------------------------------------------------------
+
+
+def _summarizer(**kwargs):
+    from actdecor import ActLLMFunctionSummarizer
+
+    return ActLLMFunctionSummarizer(RunnableLambda(lambda _: "ok"), use_inventory=False, **kwargs)
+
+
+def test_routing_off_without_key_or_url():
+    assert _summarizer().router_client is None
+
+
+def test_routing_on_with_key_in_environment(monkeypatch):
+    from actdecor.router_client import DEFAULT_URL
+
+    monkeypatch.setenv("ACTROUTER_API_KEY", "ar_live_env")
+    client = _summarizer().router_client
+    assert client.base_url == DEFAULT_URL
+    assert client.headers["x-api-key"] == "ar_live_env"
+
+
+def test_routing_on_with_key_argument():
+    client = _summarizer(router_api_key="ar_live_arg").router_client
+    assert client.headers["x-api-key"] == "ar_live_arg"
+
+
+def test_router_url_defaults_to_hosted_api():
+    import inspect
+
+    from actdecor import ActLLMFunctionSummarizer
+    from actdecor.router_client import DEFAULT_URL
+
+    default = inspect.signature(ActLLMFunctionSummarizer).parameters["router_url"].default
+    assert default == DEFAULT_URL
+
+
+def test_hosted_url_without_key_stays_off():
+    from actdecor.router_client import DEFAULT_URL
+
+    assert _summarizer(router_url=DEFAULT_URL + "/").router_client is None
+
+
+def test_router_url_none_turns_routing_off(monkeypatch):
+    monkeypatch.setenv("ACTROUTER_API_KEY", "ar_live_env")
+    assert _summarizer(router_url=None).router_client is None
+
+
+def test_actrouter_url_environment_overrides_default(monkeypatch):
+    monkeypatch.setenv("ACTROUTER_URL", "http://127.0.0.1:9000")
+    client = _summarizer().router_client
+    assert client.base_url == "http://127.0.0.1:9000"
+    assert "x-api-key" not in client.headers
+
+
+def test_routing_on_with_url_and_no_key():
+    client = _summarizer(router_url="http://127.0.0.1:8000").router_client
+    assert client.base_url == "http://127.0.0.1:8000"
+    assert "x-api-key" not in client.headers
+
+
+def test_no_key_makes_no_router_calls(monkeypatch):
+    def fail(request, timeout=None):  # pragma: no cover - must not run
+        raise AssertionError(f"unexpected request to {request.full_url}")
+
+    monkeypatch.setattr(_OPENER, fail)
+
+    @summarize_with_llm(RunnableLambda(lambda _: "ok"), return_mode="dict", use_inventory=False)
+    def add(a, b):
+        return a + b
+
+    out = add(2, 3)
+    assert out["value"] == 5
+    assert out["info"]["routing"]["source"] == "none"
 
 
 # ---------------------------------------------------------------------------
