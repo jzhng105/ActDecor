@@ -10,6 +10,8 @@ Optionally integrates with `ActRouter <https://r93hdy7zti.execute-api.us-east-1.
 the decorator can detect which major LLM vendors are usable from the current
 environment, ask ActRouter which of *those* models best fits a wrapped function,
 and cache that choice in a *function inventory file* so future calls reuse it.
+Routing turns on when ``ACTROUTER_API_KEY`` is set (or ``router_api_key=`` is
+passed); without a key ActDecor makes no calls to ActRouter.
 """
 
 from actllminfer import (

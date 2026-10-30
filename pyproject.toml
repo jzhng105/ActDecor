@@ -4,14 +4,15 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "actdecor"
-version = "0.2.2"
+version = "0.3.0"
 description = "LLM commentary decorators for Python functions, with ActRouter model routing"
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.10"
 license = { file = "LICENSE" }
 authors = [{ name = "Juntao Zhang" }]
 dependencies = [
-  "actllminfer>=0.2.0"
+  "actllminfer>=0.2.0",
+  "actrouter-client>=0.2.0",
 ]
 
 [project.optional-dependencies]
